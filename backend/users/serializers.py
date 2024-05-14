@@ -1,11 +1,13 @@
-from rest_framework import serializers
-from djoser.serializers import UserSerializer, UserCreateSerializer
-from rest_framework.validators import UniqueValidator
 import base64
+
 from django.core.files.base import ContentFile
+from django.core.validators import RegexValidator
+from djoser.serializers import UserCreateSerializer, UserSerializer
+from recipes.models import Recipe
+from rest_framework import serializers
+from rest_framework.validators import UniqueValidator
 
 from .models import Follow, User
-from recipes.models import Recipe
 
 
 class Base64ImageField(serializers.ImageField):
@@ -31,6 +33,7 @@ class CommonRecipeSerializer(serializers.ModelSerializer):
 
 
 class FollowSerializer(serializers.ModelSerializer):
+    """Сериализатор для подписок."""
     id = serializers.ReadOnlyField(
         source='author.id')
     email = serializers.ReadOnlyField(
@@ -41,34 +44,34 @@ class FollowSerializer(serializers.ModelSerializer):
         source='author.first_name')
     last_name = serializers.ReadOnlyField(
         source='author.last_name')
-    avatar = serializers.ReadOnlyField(
-        source='author.avatar')
+    avatar = serializers.SerializerMethodField()
     is_subscribed = serializers.SerializerMethodField()
     recipes = serializers.SerializerMethodField()
     recipes_count = serializers.SerializerMethodField()
 
     class Meta:
-        fields = ('email', 'id', 'username', 'first_name', 'last_name'
+        fields = ('email', 'id', 'username', 'first_name', 'last_name',
                   'is_subscribed', 'recipes', 'recipes_count', 'avatar')
         model = Follow
-        # validators = [
-        #     validators.UniqueTogetherValidator(
-        #         queryset=Follow.objects.all(),
-        #         fields=('user', 'following')
-        #     )
-        # ]
 
-    # def validate(self, data):
-    #     if self.context.get('request').user == data.get('following'):
-    #         raise serializers.ValidationError(
-    #             'Нельзя подписаться на самого себя.')
-    #     return data
+    def get_avatar(self, obj):
+        if obj.author.avatar:
+            return obj.author.avatar.url
+        return None
+
+    def validate(self, data):
+        author = self.instance.author
+        if author == self.context.get('request').user:
+            raise serializers.ValidationError(
+                'Нельзя подписаться на самого себя.')
+        return data
+
     def get_is_subscribed(self, obj):
         return Follow.objects.filter(user=obj.user, author=obj.author).exists()
 
     def get_recipes(self, obj):
         request = self.context.get('request')
-        limit = request.get('recipes_limit')
+        limit = request.query_params.get('recipes_limit')
         queryset = Recipe.objects.filter(author=obj.author)
         if limit:
             queryset = queryset[:int(limit)]
@@ -84,8 +87,8 @@ class CustomUserSerializer(UserSerializer):
 
     class Meta:
         model = User
-        fields = ['email', 'id', 'username', 'first_name', 'last_name',
-                  'is_subscribed', 'avatar']
+        fields = ('email', 'id', 'username', 'first_name', 'last_name',
+                  'is_subscribed', 'avatar')
 
     def get_is_subscribed(self, obj):
         user = self.context.get('request').user
@@ -98,18 +101,32 @@ class CustomUserSerializer(UserSerializer):
         instance.save()
         return instance
 
+    def to_representation(self, instance):
+        if self.context.get('avatar_only'):
+            data = super().to_representation(instance)
+            return {'avatar': data['avatar']}
+        else:
+            return super().to_representation(instance)
+
 
 class CustomUserCreateSerializer(UserCreateSerializer):
     email = serializers.EmailField(
         validators=[UniqueValidator(queryset=User.objects.all())])
     username = serializers.CharField(
         max_length=150,
-        validators=[UniqueValidator(queryset=User.objects.all())])
+        validators=[
+            RegexValidator(
+                regex=r'^[\w.@+-]+$',
+                message=('Username должен содержать только буквы, цифры '
+                         ' и следующие символы: @/./+/-/_'),
+                code='invalid_username'
+            ),
+            UniqueValidator(queryset=User.objects.all())])
 
     class Meta:
         model = User
-        fields = ['email', 'id', 'username', 'first_name', 'last_name',
-                  'password']
+        fields = ('email', 'id', 'username', 'first_name', 'last_name',
+                  'password')
         extra_kwargs = {
             'email': {'required': True},
             'username': {'required': True},

@@ -1,6 +1,6 @@
-from django.db import models
 from django.contrib.auth import get_user_model
 from django.core.validators import MinValueValidator
+from django.db import models
 
 from .constants import Constants
 
@@ -185,3 +185,22 @@ class ShoppingCart(models.Model):
 
     def __str__(self):
         return f'{self.user.username} добавил {self.recipe.name} в список'
+
+
+class ShortLink(models.Model):
+    """Модель короткой ссылки."""
+    short_url = models.CharField(
+        max_length=Constants.MAX_LEN_ING,
+        unique=True,
+        verbose_name='Короткая ссылка')
+    full_url = models.CharField(
+        max_length=Constants.MAX_LEN_ING,
+        unique=True,
+        verbose_name='Полная ссылка')
+    recipe = models.OneToOneField(
+        Recipe,
+        on_delete=models.CASCADE,
+        related_name='short_links')
+
+    def __str__(self):
+        return self.short_url

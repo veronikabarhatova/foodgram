@@ -1,11 +1,8 @@
-from django.shortcuts import get_object_or_404
 import base64
 
 from django.core.files.base import ContentFile
+from recipes.models import Ingredient, Recipe, RecipeIngredient, ShortLink, Tag
 from rest_framework import serializers
-
-from recipes.models import (Ingredient, RecipeIngredient,
-                            Recipe, Tag)
 from users.serializers import CustomUserSerializer
 
 
@@ -13,7 +10,7 @@ class IngredientSerializer(serializers.ModelSerializer):
     """Сериализатор для ингредиентов."""
     class Meta:
         model = Ingredient
-        fields = ['id', 'name', 'measurement_unit']
+        fields = ('id', 'name', 'measurement_unit')
 
 
 class TagSerializer(serializers.ModelSerializer):
@@ -34,7 +31,7 @@ class RecipeIngredientSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = RecipeIngredient
-        fields = ['id', 'name', 'measurement_unit', 'amount']
+        fields = ('id', 'name', 'measurement_unit', 'amount')
 
 
 class Base64ImageField(serializers.ImageField):
@@ -86,21 +83,40 @@ class RecipeSerializer(serializers.ModelSerializer):
                 'Необходимо добавить хотя бы 1 ингредиент')
         ingredient_list = []
         for ingredient_item in ingredients:
-            ingredient = get_object_or_404(
-                Ingredient,
-                id=ingredient_item['id']
-            )
-            if ingredient in ingredient_list:
+            ingredient_instance = Ingredient.objects.filter(
+                id=ingredient_item.get('id')).first()
+            if not ingredient_instance:
+                raise serializers.ValidationError(
+                    ('Такого ингредиента не существует!')
+                )
+            if ingredient_instance in ingredient_list:
                 raise serializers.ValidationError(
                     ('Такой ингредиент уже добавлен!')
                 )
-            ingredient_list.append(ingredient)
+            ingredient_list.append(ingredient_instance)
             if int(ingredient_item['amount']) <= 0:
                 raise serializers.ValidationError(
                     ('Убедитесь, что количество ингредиентов '
                      'больше 0')
                 )
         data['ingredients'] = ingredients
+        tags = self.initial_data.get('tags')
+        if not tags:
+            raise serializers.ValidationError(
+                'Необходимо добавить хотя бы 1 тег')
+        tags_list = []
+        for tag_item in tags:
+            tag_instance = Tag.objects.filter(
+                id=tag_item).first()
+            if not tag_instance:
+                raise serializers.ValidationError(
+                    ('Такого тега не существует!')
+                )
+            if tag_instance.id in [tag.id for tag in tags_list]:
+                raise serializers.ValidationError(
+                    ('Такой тег уже добавлен!')
+                )
+            tags_list.append(tag_instance)
         return data
 
     def create_ingredients(self, ingredients, recipe):
@@ -115,7 +131,6 @@ class RecipeSerializer(serializers.ModelSerializer):
         RecipeIngredient.objects.bulk_create(amounts)
 
     def create(self, validated_data):
-        # print(validated_data)
         image = validated_data.pop('image')
         ingredients_data = validated_data.pop('ingredients')
         recipe = Recipe.objects.create(image=image, **validated_data)
@@ -147,5 +162,12 @@ class CommonRecipeSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Recipe
-        fields = ['id', 'name', 'image', 'cooking_time']
+        fields = ('id', 'name', 'image', 'cooking_time')
         read_only_fields = ('id', 'name', 'image', 'cooking_time')
+
+
+class ShortLinkSerializer(serializers.ModelSerializer):
+    """Сериализатор для коротких ссылок."""
+    class Meta:
+        model = ShortLink
+        fields = ('__all__',)
