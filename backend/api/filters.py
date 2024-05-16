@@ -1,5 +1,6 @@
 import django_filters
 from django.contrib.auth import get_user_model
+
 from recipes.models import Ingredient, Recipe
 
 User = get_user_model()
@@ -29,11 +30,11 @@ class RecipeFilter(django_filters.FilterSet):
         fields = ['tags', 'author', 'is_favorited', 'is_in_shopping_cart']
 
     def filter_by_is_favorited(self, queryset, name, value):
-        if value and not self.request.user.is_anonymous:
+        if value and self.request.user.is_authenticated:
             return queryset.filter(favorites__user=self.request.user)
         return queryset
 
     def filter_by_is_in_shopping_cart(self, queryset, name, value):
-        if value and not self.request.user.is_anonymous:
+        if value and self.request.user.is_authenticated:
             return queryset.filter(cart__user=self.request.user)
         return queryset

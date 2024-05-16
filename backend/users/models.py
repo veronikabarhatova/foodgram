@@ -1,14 +1,16 @@
 from django.contrib.auth.models import AbstractUser
+from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models
-from recipes.constants import Constants
+
+from .constants import MAX_LEN_PASS_USER, MAX_LEN_USER, MAX_USER_EMAIL
 
 
 class User(AbstractUser):
     """Модель пользователя."""
     username = models.CharField(
         unique=True,
-        max_length=Constants.MAX_LEN_USER,
+        max_length=MAX_LEN_USER,
         verbose_name='Username',
         validators=[
             RegexValidator(
@@ -20,15 +22,15 @@ class User(AbstractUser):
         ],
     )
     email = models.CharField(
-        max_length=Constants.MAX_USER_EMAIL,
+        max_length=MAX_USER_EMAIL,
         verbose_name='Email'
     )
     last_name = models.CharField(
-        max_length=Constants.MAX_LEN_USER,
+        max_length=MAX_LEN_USER,
         verbose_name='Фамилия'
     )
     first_name = models.CharField(
-        max_length=Constants.MAX_LEN_USER,
+        max_length=MAX_LEN_USER,
         verbose_name='Имя'
     )
     avatar = models.ImageField(
@@ -38,7 +40,7 @@ class User(AbstractUser):
         verbose_name='Аватар'
     )
     password = models.CharField(
-        max_length=Constants.MAX_LEN_PASS_USER,
+        max_length=MAX_LEN_PASS_USER,
         verbose_name='Пароль'
     )
 
@@ -69,12 +71,22 @@ class Follow(models.Model):
     class Meta:
         verbose_name = 'Подписка'
         verbose_name_plural = 'Подписки'
+        unique_together = ('user', 'author')
         constraints = [
             models.UniqueConstraint(
-                fields=['user', 'author'],
-                name='unique_user_following'
-            ),
+                fields=['user'],
+                condition=models.Q(user=models.F('author')),
+                name='unique_self_following'
+            )
         ]
+
+    def clean(self):
+        if self.user == self.author:
+            raise ValidationError('Нельзя подписаться на самого себя.')
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f'{self.user.username} подписан на {self.author.username}'

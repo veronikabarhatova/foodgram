@@ -3,6 +3,7 @@ import os
 
 from django.conf import settings
 from django.core.management.base import BaseCommand
+
 from recipes.models import Ingredient
 
 
@@ -16,6 +17,7 @@ class Command(BaseCommand):
             'r', encoding='utf-8'
         ) as f:
             csv_reader = csv.reader(f, delimiter=',')
-            for row in csv_reader:
-                Ingredient.objects.create(name=row[0],
-                                          measurement_unit=row[1])
+            for name, measurement_unit in csv_reader:
+                Ingredient.objects.get_or_create(
+                    name=name,
+                    measurement_unit=measurement_unit)

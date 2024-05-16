@@ -6,18 +6,22 @@ from .models import FavoriteRecipe, Ingredient, Recipe, ShoppingCart, Tag
 
 class IngridientsInline(admin.TabularInline):
     model = Recipe.ingredients.through
+    min_num = 1
 
 
+@admin.register(Tag)
 class TagAdmin(admin.ModelAdmin):
     list_display = ('name', 'slug')
 
 
+@admin.register(Ingredient)
 class IngredientAdmin(admin.ModelAdmin):
     list_display = ('name', 'measurement_unit')
     list_filter = ('name',)
     search_fields = ('name',)
 
 
+@admin.register(Recipe)
 class RecipeAdmin(admin.ModelAdmin):
     list_display = ('name', 'author', 'count_favorites', 'get_ingredients')
     list_filter = ('author', 'name', 'tags')
@@ -30,14 +34,16 @@ class RecipeAdmin(admin.ModelAdmin):
     def count_favorites(self, obj):
         return obj.favorites.count()
 
+    @display(description='Ингредиенты')
     def get_ingredients(self, obj):
         return ", ".join(ing.name for ing in obj.ingredients.all())
 
-    get_ingredients.short_description = 'Ингредиенты'
+
+@admin.register(ShoppingCart)
+class ShoppingCartAdmin(admin.ModelAdmin):
+    pass
 
 
-admin.site.register(Tag, TagAdmin)
-admin.site.register(Ingredient, IngredientAdmin)
-admin.site.register(Recipe, RecipeAdmin)
-admin.site.register(ShoppingCart)
-admin.site.register(FavoriteRecipe)
+@admin.register(FavoriteRecipe)
+class FavoriteRecipeAdmin(admin.ModelAdmin):
+    pass

@@ -1,5 +1,6 @@
 from django.http import HttpResponseNotFound
 from django.shortcuts import redirect
+
 from recipes.models import ShortLink
 
 
