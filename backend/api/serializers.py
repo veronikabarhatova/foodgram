@@ -1,13 +1,18 @@
 import base64
 
+from django.contrib.auth.password_validation import validate_password
 from django.core.files.base import ContentFile
 from django.core.validators import RegexValidator
-from djoser.serializers import UserCreateSerializer, UserSerializer
+from djoser.serializers import (UserCreateSerializer
+                                as DjoserUserCreateSerializer,
+                                UserSerializer
+                                as DjoserUserSerializer)
 from rest_framework import serializers
 from rest_framework.validators import UniqueValidator
 
 from recipes.models import (FavoriteRecipe, Ingredient, Recipe,
-                            RecipeIngredient, ShortLink, Tag)
+                            RecipeIngredient, ShortLink, ShoppingCart,
+                            Tag)
 from users.models import Follow, User
 
 
@@ -21,37 +26,11 @@ class Base64ImageField(serializers.ImageField):
         return super().to_internal_value(data)
 
 
-class CustomUserSerializer(UserSerializer):
-    """Сериализатор для пользователя."""
+class UserSerializer(DjoserUserCreateSerializer, DjoserUserSerializer):
+    """Сериализатор для создания и обновления пользователя."""
     is_subscribed = serializers.SerializerMethodField()
-    avatar = Base64ImageField()
+    avatar = Base64ImageField(required=False)
 
-    class Meta:
-        model = User
-        fields = ('email', 'id', 'username', 'first_name', 'last_name',
-                  'is_subscribed', 'avatar')
-
-    def get_is_subscribed(self, obj):
-        user = self.context.get('request').user
-        if user.is_anonymous:
-            return False
-        return obj.following.filter(author=obj).exists()
-
-    def update(self, instance, validated_data):
-        instance.avatar = validated_data.get('avatar', instance.avatar)
-        instance.save()
-        return instance
-
-    def to_representation(self, instance):
-        if self.context.get('avatar_only'):
-            data = super().to_representation(instance)
-            return {'avatar': data['avatar']}
-        else:
-            return super().to_representation(instance)
-
-
-class CustomUserCreateSerializer(UserCreateSerializer):
-    """Сериализатор для создания пользователя."""
     email = serializers.EmailField(
         validators=[UniqueValidator(queryset=User.objects.all())])
     username = serializers.CharField(
@@ -68,14 +47,46 @@ class CustomUserCreateSerializer(UserCreateSerializer):
     class Meta:
         model = User
         fields = ('email', 'id', 'username', 'first_name', 'last_name',
-                  'password')
+                  'password', 'is_subscribed', 'avatar')
         extra_kwargs = {
             'email': {'required': True},
             'username': {'required': True},
             'first_name': {'required': True},
             'last_name': {'required': True},
-            'password': {'required': True},
+            'password': {'required': True, 'write_only': True},
+            'avatar': {'required': False},
         }
+
+    def get_is_subscribed(self, obj):
+        user = self.context.get('request').user
+        if not user.is_authenticated:
+            return False
+        return obj.following.filter(author=obj).exists()
+
+    def validate(self, attrs):
+        if 'password' in attrs and 'user' in self.context:
+            validate_password(attrs['password'], self.context['user'])
+        return attrs
+
+    def update(self, instance, validated_data):
+        instance.avatar = validated_data.get('avatar', instance.avatar)
+        instance.save()
+        return instance
+
+    def to_representation(self, instance):
+        request = self.context.get('request')
+        if self.context.get('avatar_only'):
+            data = super().to_representation(instance)
+            return {'avatar': data['avatar']}
+        data = super().to_representation(instance)
+        if (request and request.method == 'POST'
+                and not self.context.get('include_extra_fields', False)):
+            data.pop('is_subscribed', None)
+            data.pop('avatar', None)
+        else:
+            data['is_subscribed'] = self.get_is_subscribed(instance)
+            data['avatar'] = data.get('avatar', None)
+        return data
 
 
 class IngredientSerializer(serializers.ModelSerializer):
@@ -110,12 +121,12 @@ class RecipeSerializer(serializers.ModelSerializer):
     """Сериализатор для рецепта."""
     tags = TagSerializer(read_only=True, many=True)
     image = Base64ImageField()
-    author = CustomUserSerializer(read_only=True)
+    author = UserSerializer(read_only=True)
     ingredients = RecipeIngredientSerializer(
         source='recipeingredient_set',
         read_only=True, many=True)
-    is_favorited = serializers.SerializerMethodField()
-    is_in_shopping_cart = serializers.SerializerMethodField()
+    is_favorited = serializers.BooleanField(read_only=True)
+    is_in_shopping_cart = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = Recipe
@@ -123,18 +134,6 @@ class RecipeSerializer(serializers.ModelSerializer):
                   'is_favorited', 'is_in_shopping_cart',
                   'name', 'image', 'text',
                   'cooking_time')
-
-    def get_is_favorited(self, obj):
-        user = self.context.get('request').user
-        if not user.is_authenticated:
-            return False
-        return obj.favorites.filter(user=user).exists()
-
-    def get_is_in_shopping_cart(self, obj):
-        user = self.context.get('request').user
-        if not user.is_authenticated:
-            return False
-        return obj.cart.filter(user=user).exists()
 
     def validate(self, data):
         ingredients = self.initial_data.get('ingredients')
@@ -206,12 +205,17 @@ class RecipeSerializer(serializers.ModelSerializer):
         if 'ingredients' in validated_data:
             ingredients = validated_data.pop('ingredients')
             self.create_ingredients(ingredients, instance)
-        instance = super().update(instance, validated_data)
-        return instance
+        return super().update(instance, validated_data)
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data['is_favorited'] = instance.is_favorited
+        data['is_in_shopping_cart'] = instance.is_in_shopping_cart
+        return data
 
 
-class CommonRecipeSerializer(serializers.ModelSerializer):
-    """Сериализатор для списка покупок и избранного."""
+class ShortRecipeSerializer(serializers.ModelSerializer):
+    """Сериализатор для короткого рецепта."""
     image = Base64ImageField()
 
     class Meta:
@@ -219,14 +223,41 @@ class CommonRecipeSerializer(serializers.ModelSerializer):
         fields = ('id', 'name', 'image', 'cooking_time')
         read_only_fields = ('id', 'name', 'image', 'cooking_time')
 
-    def validate(self, data):
-        user = self.context['request'].user
-        recipe = data['recipe']
 
-        if FavoriteRecipe.objects.filter(user=user, recipe=recipe).exists():
-            raise serializers.ValidationError(
-                {'error': 'Рецепт уже добавлен в избранное'})
-        return data
+class FavoriteSerializer(serializers.ModelSerializer):
+    """Сериализатор для избранного."""
+
+    class Meta:
+        model = FavoriteRecipe
+        fields = (
+            'user',
+            'recipe',
+        )
+        validators = [
+            serializers.UniqueTogetherValidator(
+                queryset=FavoriteRecipe.objects.all(),
+                fields=('user', 'recipe'),
+                message='Рецепт уже в избранном!'
+            )
+        ]
+
+
+class ShoppingCartSerializer(serializers.ModelSerializer):
+    """Сериализатор для списка покупок."""
+
+    class Meta:
+        model = ShoppingCart
+        fields = (
+            'user',
+            'recipe',
+        )
+        validators = [
+            serializers.UniqueTogetherValidator(
+                queryset=ShoppingCart.objects.all(),
+                fields=('user', 'recipe'),
+                message='Рецепт уже добавлен в список покупок!'
+            )
+        ]
 
 
 class ShortLinkSerializer(serializers.ModelSerializer):
@@ -255,13 +286,28 @@ class FollowSerializer(serializers.ModelSerializer):
 
     class Meta:
         fields = ('email', 'id', 'username', 'first_name', 'last_name',
-                  'is_subscribed', 'recipes', 'recipes_count', 'avatar')
+                  'is_subscribed', 'recipes', 'recipes_count', 'avatar',
+                  'author')
         model = Follow
 
     def get_avatar(self, obj):
         if obj.author.avatar:
             return obj.author.avatar.url
         return None
+
+    def get_is_subscribed(self, obj):
+        return obj.user.following.filter(author=obj.author).exists()
+
+    def get_recipes(self, obj):
+        request = self.context.get('request')
+        limit = request.query_params.get('recipes_limit')
+        queryset = Recipe.objects.filter(author=obj.author)
+        if limit:
+            queryset = queryset[:int(limit)]
+        return ShortRecipeSerializer(queryset, many=True).data
+
+    def get_recipes_count(self, obj):
+        return Recipe.objects.filter(author=obj.author).count()
 
     def validate_id(self, value):
         user_exists = User.objects.filter(id=value).exists()
@@ -281,16 +327,9 @@ class FollowSerializer(serializers.ModelSerializer):
                 'Вы уже подписаны на этого пользователя.')
         return data
 
-    def get_is_subscribed(self, obj):
-        return obj.user.following.filter(author=obj.author).exists()
-
-    def get_recipes(self, obj):
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
         request = self.context.get('request')
-        limit = request.query_params.get('recipes_limit')
-        queryset = Recipe.objects.filter(author=obj.author)
-        if limit:
-            queryset = queryset[:int(limit)]
-        return CommonRecipeSerializer(queryset, many=True).data
-
-    def get_recipes_count(self, obj):
-        return Recipe.objects.filter(author=obj.author).count()
+        if request and not request.user.is_staff:
+            data.pop('author', None)
+        return data

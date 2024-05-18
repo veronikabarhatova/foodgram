@@ -1,5 +1,4 @@
 from django.contrib.auth.models import AbstractUser
-from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models
 
@@ -74,19 +73,11 @@ class Follow(models.Model):
         unique_together = ('user', 'author')
         constraints = [
             models.UniqueConstraint(
-                fields=['user'],
+                fields=['user', 'author'],
                 condition=models.Q(user=models.F('author')),
                 name='unique_self_following'
             )
         ]
-
-    def clean(self):
-        if self.user == self.author:
-            raise ValidationError('Нельзя подписаться на самого себя.')
-
-    def save(self, *args, **kwargs):
-        self.clean()
-        super().save(*args, **kwargs)
 
     def __str__(self):
         return f'{self.user.username} подписан на {self.author.username}'
