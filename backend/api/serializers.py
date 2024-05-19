@@ -74,18 +74,13 @@ class UserSerializer(DjoserUserCreateSerializer, DjoserUserSerializer):
         return instance
 
     def to_representation(self, instance):
-        request = self.context.get('request')
-        if self.context.get('avatar_only'):
-            data = super().to_representation(instance)
-            return {'avatar': data['avatar']}
         data = super().to_representation(instance)
-        if (request and request.method == 'POST'
-                and not self.context.get('include_extra_fields', False)):
+        if self.context.get('avatar_only'):
+            return {'avatar': data['avatar']}
+        registration = self.context.get('registration', False)
+        if registration:
             data.pop('is_subscribed', None)
             data.pop('avatar', None)
-        else:
-            data['is_subscribed'] = self.get_is_subscribed(instance)
-            data['avatar'] = data.get('avatar', None)
         return data
 
 
@@ -125,8 +120,10 @@ class RecipeSerializer(serializers.ModelSerializer):
     ingredients = RecipeIngredientSerializer(
         source='recipeingredient_set',
         read_only=True, many=True)
-    is_favorited = serializers.BooleanField(read_only=True)
-    is_in_shopping_cart = serializers.BooleanField(read_only=True)
+    is_favorited = serializers.BooleanField(
+        read_only=True, default=False)
+    is_in_shopping_cart = serializers.BooleanField(
+        read_only=True, default=False)
 
     class Meta:
         model = Recipe
@@ -208,10 +205,15 @@ class RecipeSerializer(serializers.ModelSerializer):
         return super().update(instance, validated_data)
 
     def to_representation(self, instance):
-        data = super().to_representation(instance)
-        data['is_favorited'] = instance.is_favorited
-        data['is_in_shopping_cart'] = instance.is_in_shopping_cart
-        return data
+        representation = super().to_representation(instance)
+        include_extra_fields = self.context.get('include_extra_fields', False)
+        if include_extra_fields:
+            user = self.context['request'].user
+            if user.is_authenticated:
+                representation['is_favorited'] = instance.is_favorited
+                representation['is_in_shopping_cart'] = (
+                    instance.is_in_shopping_cart)
+        return representation
 
 
 class ShortRecipeSerializer(serializers.ModelSerializer):
@@ -241,6 +243,9 @@ class FavoriteSerializer(serializers.ModelSerializer):
             )
         ]
 
+    def to_representation(self, instance):
+        return ShortRecipeSerializer(instance.recipe).data
+
 
 class ShoppingCartSerializer(serializers.ModelSerializer):
     """Сериализатор для списка покупок."""
@@ -258,6 +263,9 @@ class ShoppingCartSerializer(serializers.ModelSerializer):
                 message='Рецепт уже добавлен в список покупок!'
             )
         ]
+
+    def to_representation(self, instance):
+        return ShortRecipeSerializer(instance.recipe).data
 
 
 class ShortLinkSerializer(serializers.ModelSerializer):

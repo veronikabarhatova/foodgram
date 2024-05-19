@@ -21,8 +21,8 @@ from .pagination import CustomPagination
 from .permissions import OwnerOrReadOnly
 from .serializers import (FavoriteSerializer, FollowSerializer,
                           IngredientSerializer, RecipeSerializer,
-                          ShoppingCartSerializer, ShortRecipeSerializer,
-                          TagSerializer, UserSerializer)
+                          ShoppingCartSerializer, TagSerializer,
+                          UserSerializer)
 from .services import annotate_recipes_with_user_flags
 
 
@@ -60,45 +60,15 @@ class RecipeViewSet(viewsets.ModelViewSet):
         return context
 
     def perform_create(self, serializer):
-        recipe = serializer.save(author=self.request.user)
-        annotated_queryset = annotate_recipes_with_user_flags(
-            Recipe.objects.filter(pk=recipe.pk), self.request.user)
-        annotated_recipe = annotated_queryset.first()
-        serializer.instance.is_favorited = annotated_recipe.is_favorited
-        serializer.instance.is_in_shopping_cart = (
-            annotated_recipe.is_in_shopping_cart)
-
-    def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        self.perform_create(serializer)
-        context = self.get_serializer_context()
-        context['include_extra_fields'] = True
-        serializer = self.get_serializer(serializer.instance, context=context)
-        headers = self.get_success_headers(serializer.data)
-        return Response(serializer.data, status=status.HTTP_201_CREATED,
-                        headers=headers)
+        serializer.save(author=self.request.user)
 
     def get_queryset(self):
-        queryset = Recipe.objects.all()
+        queryset = Recipe.objects.select_related('author').prefetch_related(
+            'tags', 'ingredients')
         user = self.request.user
-
-        queryset = annotate_recipes_with_user_flags(queryset, user)
-
-        is_favorited = self.request.query_params.get('is_favorited')
-        if is_favorited is not None:
-            is_favorited_bool = bool(int(is_favorited))
-            queryset = queryset.filter(
-                is_favorited=is_favorited_bool)
-
-        is_in_shopping_cart = self.request.query_params.get(
-            'is_in_shopping_cart')
-        if is_in_shopping_cart is not None:
-            is_in_shopping_cart_bool = bool(int(is_in_shopping_cart))
-            queryset = queryset.filter(
-                is_in_shopping_cart=is_in_shopping_cart_bool)
-
-        return queryset.distinct()
+        if user.is_authenticated:
+            queryset = annotate_recipes_with_user_flags(queryset, user)
+        return queryset
 
     def get_object(self):
         queryset = self.get_queryset()
@@ -111,18 +81,12 @@ class RecipeViewSet(viewsets.ModelViewSet):
     def add_to_cart_or_favorites(request, pk, serializer_class):
         """Статичный метод для добавления в корзину/избранное."""
         user = request.user
-        # recipe = Recipe.objects.get(pk=pk)
         recipe = get_object_or_404(Recipe, pk=pk)
         serializer = serializer_class(data={'user': user.id,
                                             'recipe': recipe.id})
-        if serializer.is_valid():
-            serializer.save()
-            short_recipe_serializer = ShortRecipeSerializer(recipe)
-            return Response(
-                short_recipe_serializer.data, status=status.HTTP_201_CREATED)
-        else:
-            return Response(serializer.errors,
-                            status=status.HTTP_400_BAD_REQUEST)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     @staticmethod
     def remove_from_cart_or_favorites(request, pk, model_class):
@@ -221,6 +185,11 @@ class UserViewSet(DjoserUserViewSet):
             return [IsAuthenticated()]
         else:
             return super().get_permissions()
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['registration'] = (self.action == 'create')
+        return context
 
     @action(methods=['get'], detail=False,
             permission_classes=(IsAuthenticated,))
