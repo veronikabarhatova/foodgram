@@ -70,13 +70,6 @@ class RecipeViewSet(viewsets.ModelViewSet):
             queryset = annotate_recipes_with_user_flags(queryset, user)
         return queryset
 
-    def get_object(self):
-        queryset = self.get_queryset()
-        filter_kwargs = {self.lookup_field: self.kwargs[self.lookup_field]}
-        obj = get_object_or_404(queryset, **filter_kwargs)
-        self.check_object_permissions(self.request, obj)
-        return obj
-
     @staticmethod
     def add_to_cart_or_favorites(request, pk, serializer_class):
         """Статичный метод для добавления в корзину/избранное."""

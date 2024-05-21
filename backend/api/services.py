@@ -14,7 +14,7 @@ def redirection(request, short_url):
 
 
 def annotate_recipes_with_user_flags(queryset, user):
-    queryset = queryset.annotate(
+    return queryset.annotate(
         is_favorited=Exists(
             FavoriteRecipe.objects.filter(
                 user=user, recipe=OuterRef('pk')
@@ -26,4 +26,3 @@ def annotate_recipes_with_user_flags(queryset, user):
             )
         )
     )
-    return queryset
