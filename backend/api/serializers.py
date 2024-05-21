@@ -61,7 +61,7 @@ class UserSerializer(DjoserUserCreateSerializer, DjoserUserSerializer):
         user = self.context.get('request').user
         if not user.is_authenticated:
             return False
-        return obj.following.filter(author=obj).exists()
+        return obj.following.filter(author=obj, user=user).exists()
 
     def validate(self, attrs):
         if 'password' in attrs and 'user' in self.context:
